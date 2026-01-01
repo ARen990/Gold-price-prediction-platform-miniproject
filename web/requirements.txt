@@ -1,0 +1,13 @@
+# Core web framework
+Flask>=3.0,<3.1
+Flask-Cors>=4.0,<5.0
+
+# Data handling
+pandas>=2.2,<2.3
+numpy>=1.26,<2.1
+
+# Market data
+yfinance>=0.2.54,<0.3
+
+# Chart spec generation (Altair -> Vega-Lite JSON)
+altair>=5.3,<6.0

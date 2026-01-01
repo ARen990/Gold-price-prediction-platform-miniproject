@@ -1,0 +1,1349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gold Price Prediction Platform</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/vega@5"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vega-lite@5"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>
+  <script src="https://s3.tradingview.com/tv.js"></script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  
+  <style>
+    /* --- Variables --- */
+    :root {
+      --medium-blue-accent: #3361AC;
+      --off-white: #E7E6DD;
+      --graph-grey: #333333;
+      --light-gold: #E8C766;
+      --gold-accent: #E8AF30;
+      --medium-blue-panel: #162F65;
+      --dark-blue-bg: #0F2043;
+      --positive-green: #2ecc71;
+      --negative-red: #e74c3c;
+
+      /* controls */
+      --control-h: 44px;
+      --control-radius: 12px;
+      --control-pad-x: 18px;
+    }
+
+    /* ====== (ทั้งหมดตามที่คุณให้มา) ====== */
+    /* --- Full-Window Layout --- */
+    html, body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        font-family: 'Roboto', sans-serif;
+        font-size: 25px;
+        background-color: var(--dark-blue-bg);
+        color: var(--off-white);
+    }
+    
+    /* Container grid for main UI */
+    .container {
+        display: grid;
+        grid-template-columns: 280px 1fr 300px; /* Three columns for a clean look */
+        gap: 15px;
+        height: 100%;
+        padding: 15px;
+        box-sizing: border-box;
+        background-color: transparent;
+    }
+    
+    /* Reusable Panel Styles */
+    .panel {
+        background-color: var(--medium-blue-panel);
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        display: flex;
+        flex-direction: column;
+    }
+
+    /* Left Sidebar */
+    .sidebar-left {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+    }
+    select {
+        width: 100%;
+        padding: 10px;
+        border-radius: 6px;
+        border: none;
+        background-color: var(--dark-blue-bg);
+        color: var(--off-white);
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    .date-box {
+        font-size: 4rem;
+        font-weight: 700;
+        border: 2px solid var(--medium-blue-accent);
+        border-radius: 12px;
+        text-align: center;
+        padding: 15px 0;
+        user-select: none;
+        flex-shrink: 0; 
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
+    }
+    .date-box .day {
+        font-size: 4rem;
+        line-height: 1.2;
+    }
+    .date-box .month {
+        font-size: 1.5rem;
+    }
+    .date-box .time {
+        font-size: 2rem;
+        margin-top: 10px;
+        color: var(--gold-accent);
+    }
+    .realtime-goldprice-container {
+        background-color: transparent;
+        border: 2px solid var(--off-white);
+        height: fit-content; 
+        flex-shrink: 0; 
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 15px 15px;
+        color: white;
+        border-radius: 12px;
+        text-align: center;
+    }
+    .realtime-goldprice-container h3 {
+        font-size: 1.5rem;
+        color: var(--light-gold);
+    }
+    .price {
+        font-size: 1.6rem;
+        margin: 20px 0;
+        font-weight: 700;
+    }
+    .timestamp {
+        color: #99A1C4;
+        font-size: 0.9em;
+        text-align: right;
+        margin-bottom: 0; 
+    }
+    .exogenous-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+    .exogenous-list li {
+        background-color: var(--dark-blue-bg);
+        border-radius: 8px;
+        padding: 10px;
+        cursor: pointer;
+        transition: background-color 0.3s ease;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .exogenous-list li:hover {
+        background-color: var(--medium-blue-accent);
+    }
+
+    /* Main Content */
+    .main-content {
+        display: flex;
+        flex-direction: column;
+        grid-template-rows: auto 1fr auto;
+        gap: 15px;
+    }
+
+    .header {
+        border-bottom: 2px solid var(--medium-blue-accent);
+        padding-bottom: 10px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 700;
+        font-size: 1.5rem;
+    }
+    .header svg {
+        width: 30px;
+        height: 30px;
+        stroke: var(--light-gold);
+    }
+    .subtitle {
+        font-size: 1.5rem;
+        font-weight: 600;
+    }
+
+    .controls-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        width: 100%;
+        box-sizing: border-box;
+        }
+    .controls-row.tag-buttons {
+        display: flex;
+        gap: 20px;
+        margin-bottom: 15px;
+    }
+    .tag-buttons button {
+        background-color: var(--medium-blue-accent);
+        border: none;
+        border-radius: 8px;
+        color: white;
+        padding: 6px 15px;
+        font-size: 1.25rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background-color 0.3s ease;
+    }
+    .tag-buttons button:hover, .tag-buttons button.active {
+        background-color: var(--gold-accent);
+    }
+    .tag-buttons,
+    #model-buttons {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 12px;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    /* ให้ปุ่มยืดเต็มช่องที่ได้รับ */
+    .tag-buttons > button,
+    #model-buttons > button {
+        width: 100%;
+        justify-self: stretch;
+        padding: 10px 12px;
+        border-radius: 10px;
+        font-weight: 600;
+    }
+
+    /* สถานะปุ่ม */
+    .tag-buttons button,
+    #model-buttons button {
+        background-color: var(--medium-blue-accent);
+        border: none;
+        color: #fff;
+        cursor: pointer;
+        transition: background-color .2s ease;
+    }
+    .tag-buttons button:hover,
+    .tag-buttons button.active,
+    #model-buttons button:hover,
+    #model-buttons button.active {
+        background-color: var(--gold-accent);
+    }
+    #model-buttons button.btn-disabled {
+        opacity: .5;
+        pointer-events: none;
+    }
+
+    /* ---- ค่ากลางให้คุมทุกคอนโทรล ---- */
+    :root{
+        --control-h: 44px;       
+        --control-radius: 12px;
+        --control-pad-x: 18px;
+    }
+
+    .controls-row{
+        display:flex;
+        align-items:center;         
+        gap:12px;
+        width:100%;
+    }
+
+    .controls-row .tag-buttons{
+        display:flex;
+        gap:10px;
+        flex-wrap:nowrap;
+    }
+
+    .btn-period{
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        min-height:var(--control-h);
+        padding:0 var(--control-pad-x);
+        border-radius:var(--control-radius);
+        font-weight:700;
+        font-size:16px;
+        line-height:1;              
+    }
+
+    .model-select-wrap{
+        margin-left:auto;
+        position: relative;       
+        display:flex;
+        align-items:center;
+        gap:8px;
+    }
+
+    .model-select-wrap label{
+        color:#cfd5ff;              
+        font-size: 1.25rem;
+        font-weight:600;
+    }
+
+    #model-select{
+        height:var(--control-h);
+        line-height:var(--control-h);   
+        padding:0 var(--control-pad-x);
+        border-radius:var(--control-radius);
+        border:1px solid var(--medium-blue-accent);
+        background:var(--dark-blue);
+        color:#fff;
+        font-weight:700;
+        font-size: 1rem;
+        width: 180px;
+        text-align: center;
+        text-align-last: center; 
+        box-sizing:border-box;
+        appearance:none;                
+    }
+    #model-select option{
+        background: var(--medium-blue-accent);
+        text-align: left;
+    }
+
+    .arimax-emoji {
+        display: inline-block;
+        color: var(--gold-accent);
+        margin-left: 8px;
+    }
+
+    .btn-period.active{ 
+        background:var(--gold-accent);
+    }
+
+    .chart-placeholder {
+        background-color: var(--graph-grey);
+        border: 2px solid var(--medium-blue-accent);
+        border-radius: 12px;
+        flex-grow: 1;
+        min-height: 20vh;
+        height: 40vh;
+        width: 100%;
+        position: relative;
+        overflow: hidden;
+    }
+    #vega-chart-container, #tv-chart-container {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+    }
+
+    /* TradingView specific styling */
+    #tv-chart-container {
+        display: none;
+    }
+
+    /* Ensure TradingView widget fills the container */
+    .tradingview-widget-container {
+        width: 100% !important;
+        height: 100% !important;
+    }
+
+    .tradingview-widget-container iframe {
+        width: 100% !important;
+        height: 100% !important;
+        border: none !important;
+        border-radius: 10px !important;
+    }
+    .indicators {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 15px;
+    }
+    /* Indicator styling */
+    #indicator {
+        background-color: var(--medium-blue-panel);
+        border-radius: 8px;
+        padding: 12px 20px;
+        margin-top: 10px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 30px;
+        border: 1px solid var(--medium-blue-accent);
+    }
+
+    #indicator-high, #indicator-low {
+        font-size: 16px;
+        color: var(--off-white);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    #indicator .value {
+        color: var(--light-gold);
+        font-weight: 700;
+        font-size: 18px;
+    }
+
+    /* Right Sidebar */
+    .sidebar-right {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
+    .market-context {
+        margin-bottom: 30px;
+    }
+    .market-context h3 {
+        border-bottom: 2px solid var(--medium-blue-accent);
+        padding-bottom: 8px;
+        margin-bottom: 15px;
+        font-weight: 700;
+        font-size: 1.1rem;
+        color: var(--light-gold);
+    }
+    .context-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+    .context-list li {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 500;
+    }
+    .context-label {
+        min-width: 60px;
+    }
+    .progress-bar-bg {
+        background-color: var(--dark-blue-bg);
+        height: 12px;
+        border-radius: 8px;
+        flex-grow: 1;
+        position: relative;
+        overflow: hidden;
+    }
+    .progress-bar-fill {
+        height: 12px;
+        border-radius: 8px;
+        position: absolute;
+        top: 0;
+        left: 0;
+    }
+    .positive {
+        background-color: var(--positive-green);
+    }
+    .negative {
+        background-color: var(--negative-red);
+    }
+    .context-value {
+        min-width: 1px;
+        font-weight: 700;
+        text-align: right;
+    }
+    /* .confidence-intervals {
+        font-weight: 500;
+        margin-bottom: 20px;
+    }
+    .confidence-intervals h3 {
+        border-bottom: 2px solid var(--medium-blue-accent);
+        padding-bottom: 8px;
+        margin-bottom: 15px;
+        font-weight: 700;
+        font-size: 1.1rem;
+        color: var(--light-gold);
+    } */
+    .last-update {
+        color: #99A1C4;
+        font-size: 0.85rem;
+        text-align: right;
+    }
+        
+    /* ====== (เพิ่มของที่จำเป็นต่อกราฟ) ====== */
+    #vega-chart-container{ width:100%; height:100%; }
+    .vega-embed{ width:100%; height:100%; }
+    .vega-embed canvas, .vega-embed svg{ width:100%; height:100%; display:block; }
+
+    /* Responsive */
+    @media (max-width: 600px) {
+      .container { grid-template-columns: 250px 1fr 280px; }
+    }
+    @media (max-width: 384px) {
+      html, body { overflow-y: auto; }
+      .container { grid-template-columns: 1fr; height: auto; padding: 10px; }
+      .sidebar-left, .main-content, .sidebar-right { grid-column: 1 / 2; }
+      .chart-placeholder { height: 400px; min-height: 400px; }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <aside class="panel sidebar-left">
+      <div class="date-box" id="date-box">
+        <span class="day"></span>
+        <span class="month"></span>
+        <span class="time"></span>
+      </div>
+
+      <div class="realtime-goldprice-container">
+        <h3>Current Gold Price</h3>
+        <p id="current-price" class="price">Failed to fetch price</p>
+        <p id="price-timestamp" class="timestamp"></p>
+        <p id="pred-1h"></p>
+        <p id="pred-24h"></p>
+      </div>
+
+      <div>
+        <h3 style="color:var(--light-gold); font-weight:700; margin-bottom:10px;">Exogenous Variables</h3>
+        <ul class="exogenous-list">
+          <li><input type="checkbox" checked><span class="variable-text">^GSPC<br><span class="description">(S&P 500 Index)</span></span></li>
+          <li><input type="checkbox" checked><span class="variable-text">SLV<br><span class="description">(Silver Price)</span></span></li>
+          <li><input type="checkbox" checked><span class="variable-text">BTC/USD<br><span class="description">(Bitcoin)</span></span></li>
+          <li><input type="checkbox" checked><span class="variable-text">EURUSD=X<br><span class="description">(Euro / US Dollar Exchange Rate)</span></span></li>
+          <li><input type="checkbox" checked><span class="variable-text">INDEXDJX<br><span class="description">(Dow Jones Industrial Average)</span></span></li>
+        </ul>
+      </div>
+    </aside>
+
+    <main class="panel main-content">
+      <div class="header">
+        <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-atom"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v2M2 12h2M12 20v2M22 12h-2"></path><path d="m19.07 4.93-1.41 1.41M6.34 17.66l-1.41 1.41M6.34 6.34l-1.41-1.41M19.07 19.07l-1.41-1.41"></path></svg>
+        GOLD PRICE PREDICTION PLATFORM
+      </div>
+      <div class="subtitle">GOLD (XAUUSD)</div>
+
+      <div class="controls-row">
+        <div class="tag-buttons">
+          <button class="btn-period active" data-period="LIVE">LIVE</button>
+          <!-- <button class="btn-period" data-period="1H">1H</button> -->
+          <button class="btn-period" data-period="24H">24H</button>
+          <button class="btn-period" data-period="1W">1W</button>
+          <button class="btn-period" data-period="1M">1M</button>
+          <button class="btn-period" data-period="3M">3M</button>
+          <button class="btn-period" data-period="6M">6M</button>
+        </div>
+
+        <div class="model-select-wrap">
+          <label for="model-select" class="sr-only">Model</label>
+          <select id="model-select">
+            <option value="All">All</option>
+            <option value="Prophet">Prophet</option>
+            <option value="BVAR">BVAR</option>
+            <option value="SARIMAX">ARIMAX <span class="arimax-emoji">◁</span></option>
+            <option value="LSTM">LSTM</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="chart-placeholder">
+        <div id="vega-chart-container" ></div>
+        <div id="tv-chart-container" style="display:none; width:100%; height:100px;"></div>
+      </div>
+      <!-- <div id="indicator">
+        <div id="indicator-high">Highest: <strong class="value">-</strong></div>
+        <div id="indicator-low">Lowest: <strong class="value">-</strong></div>
+      </div> -->
+    </main>
+
+    <aside class="panel sidebar-right">
+      <div class="market-context">
+        <h3>Market Trends</h3>
+        <ul class="context-list">
+          <li><span class="context-label">1Hour</span><div class="progress-bar-bg"><div class="progress-bar-fill positive" style="width:100%;"></div></div><span class="context-value"></span></li>
+          <li><span class="context-label">24Hours</span><div class="progress-bar-bg"><div class="progress-bar-fill positive" style="width:100%;"></div></div><span class="context-value"></span></li>
+          <li><span class="context-label">1Week</span><div class="progress-bar-bg"><div class="progress-bar-fill positive" style="width:100%;"></div></div><span class="context-value"></span></li>
+          <li><span class="context-label">1Month</span><div class="progress-bar-bg"><div class="progress-bar-fill positive" style="width:100%;"></div></div><span class="context-value"></span></li>
+          <li><span class="context-label">3Month</span><div class="progress-bar-bg"><div class="progress-bar-fill positive" style="width:100%;"></div></div><span class="context-value"></span></li>
+          <li><span class="context-label">6Month</span><div class="progress-bar-bg"><div class="progress-bar-fill positive" style="width:100%;"></div></div><span class="context-value"></span></li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const dateDay = document.querySelector('.date-box .day');
+      const dateMonth = document.querySelector('.date-box .month');
+      const dateTime = document.querySelector('.date-box .time');
+      let currentView = null;
+
+      function updateLocalTime(){
+        const now = new Date();
+        dateDay.textContent = now.getDate();
+        dateMonth.textContent = now.toLocaleString('default',{month:'short'});
+        dateTime.textContent = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+      }
+
+      function fetchGoldPrice(){
+        fetch('/api/gold-price')
+          .then(r=>r.json())
+          .then(data=>{
+            if(data.latest_price){
+              document.getElementById('current-price').innerText = `$${(+data.latest_price).toFixed(2)}`;
+              if(data.timestamp){
+                const thai = new Intl.DateTimeFormat('th-TH',{year:'numeric',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:'Asia/Bangkok'}).format(new Date(data.timestamp));
+                document.getElementById('price-timestamp').innerText = `Last Update: ${thai}`;
+              }
+            }else{
+              document.getElementById('current-price').innerText = data.message || 'Failed to fetch price';
+            }
+          })
+          .catch(()=>{ document.getElementById('current-price').innerText = 'Failed to fetch price'; });
+      }
+
+      function fetchMarketTrends() {
+          fetch('/api/market-trends')
+              .then(res => res.json())
+              .then(data => {
+                  const list = document.getElementById('market-trends-list');
+                  list.innerHTML = ''; // Clear old trends
+                  for (const [period, value] of Object.entries(data)) {
+                      const item = document.createElement('li');
+                      const progressClass = value >= 50 ? 'positive' : 'negative';
+                      item.innerHTML = `
+                          <span>${period}</span>
+                          <div class="progress-bar-bg">
+                              <div class="progress-bar-fill ${progressClass}" style="width:${value}%;"></div>
+                          </div>
+                          <span>${value}%</span>
+                      `;
+                      list.appendChild(item);
+                  }
+              })
+              .catch(err => console.error('Failed to fetch market trends:', err));
+      }
+      
+      function showLivePlaceholder(){
+        const el = document.getElementById('vega-chart-container');
+        el.innerHTML = `
+          <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#E8C766;font-weight:700;">
+            Live chart will be connected to API later.
+          </div>`;
+      }
+
+      function showAllModelsPlaceholder(){
+        const el = document.getElementById('vega-chart-container');
+        el.innerHTML = `
+          <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#E8C766;font-weight:700;text-align:center;">
+            Please select a specific model<br>to view the forecast chart
+          </div>`;
+      }
+
+      function ensureIndicatorDom(){
+        let wrap = document.getElementById('indicator');
+        if (!wrap) {
+          wrap = document.createElement('div');
+          wrap.id = 'indicator';
+          wrap.style.cssText = 'margin-top:8px;color:#e6edf6;font-size:16px;display:flex;gap:18px;';
+          document.getElementById('vega-chart-container')?.after(wrap);
+        }
+        if (!document.querySelector('#indicator-high')) {
+          const hi = document.createElement('div');
+          hi.id = 'indicator-high';
+          hi.innerHTML = 'Highest: <strong class="value">-</strong>';
+          wrap.appendChild(hi);
+        }
+        if (!document.querySelector('#indicator-low')) {
+          const lo = document.createElement('div');
+          lo.id = 'indicator-low';
+          lo.innerHTML = 'Lowest: <strong class="value">-</strong>';
+          wrap.appendChild(lo);
+        }
+      }
+
+      function setupClickIndicator(res){
+        // 1) DOM
+        ensureIndicatorDom();
+        const elHigh = document.querySelector('#indicator-high .value');
+        const elLow  = document.querySelector('#indicator-low  .value');
+        const fmt = n => Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+
+        // 2) ดึงข้อมูลจาก Vega view
+        let rows = [];
+        try {
+          const names = (typeof res.view.dataNames === 'function') ? res.view.dataNames() : [];
+          const preferred = ['source_0','data_0', ...names];
+          const seen = new Set();
+          for (const nm of preferred) {
+            if (!nm || seen.has(nm)) continue;
+            seen.add(nm);
+            const arr = res.view.data(nm) || [];
+            if (Array.isArray(arr) && arr.length && 'Date' in arr[0] && 'High' in arr[0] && 'Low' in arr[0]) {
+              rows = arr.map(d=>({...d}));
+              break;
+            }
+          }
+        } catch(e){}
+
+        if (!rows.length && res.spec && res.spec.data && Array.isArray(res.spec.data.values)) {
+          const arr = res.spec.data.values;
+          if (arr?.length && 'Date' in arr[0] && 'High' in arr[0] && 'Low' in arr[0]) rows = arr.slice();
+        }
+        if (!rows.length) { elHigh.textContent='-'; elLow.textContent='-'; return; }
+
+        // 3) เตรียม timestamp
+        for (const d of rows) d.__t = new Date(d.Date).getTime();
+
+        // 4) อ่านโดเมน X ปัจจุบัน (รองรับซูม/แพน)
+        function currentXDomain(){
+          let x0 = Math.min(...rows.map(r=>r.__t));
+          let x1 = Math.max(...rows.map(r=>r.__t));
+          try {
+            const st = res.view.getState({signals:'raw'}) || {};
+            const sigs = Object.keys(st.signals || {});
+            const sig = sigs.find(n => /^zoom.*_x$/.test(n)) || null; // ชื่อสัญญาณซูมที่ Altair ตั้งไว้
+            if (sig) {
+              const v = res.view.signal(sig);
+              if (Array.isArray(v)) [x0, x1] = v;
+              else if (v && Array.isArray(v.extent)) [x0, x1] = v.extent;
+            }
+          } catch(e){}
+          return [x0, x1];
+        }
+
+        const visibleRows = () => {
+          const [x0,x1] = currentXDomain();
+          return rows.filter(r => r.__t >= x0 && r.__t <= x1);
+        };
+
+        function setMinMax(dataSubset){
+          if (!dataSubset.length) { elHigh.textContent='-'; elLow.textContent='-'; return; }
+          let hi = -Infinity, lo = Infinity;
+          for (const r of dataSubset) {
+            const H = +r.High, L = +r.Low;
+            if (Number.isFinite(H) && H > hi) hi = H;
+            if (Number.isFinite(L) && L < lo) lo = L;
+          }
+          elHigh.textContent = Number.isFinite(hi) ? fmt(hi) : '-';
+          elLow.textContent  = Number.isFinite(lo) ? fmt(lo) : '-';
+        }
+
+        // 5) ค่าเริ่มต้น & ดับเบิลคลิก = min/max ของช่วงที่มองเห็น
+        function resetIndicator(){ setMinMax(visibleRows()); }
+        resetIndicator();
+
+        // 6) หาแท่งใกล้ตำแหน่งคลิก (รองรับทั้ง canvas และ svg)
+        function getChartElement(){
+          const container = document.getElementById('vega-chart-container');
+          return container?.querySelector('canvas') || container?.querySelector('svg') || null;
+        }
+        function nearestRowFromClick(ev){
+          const el = getChartElement();
+          if (!el) return null;
+          const rect = el.getBoundingClientRect();
+          const xPx  = ev.clientX - rect.left;
+          const [x0,x1] = currentXDomain();
+          const t = x0 + (x1 - x0) * (xPx / rect.width);
+          let best=null, bestAbs=Infinity;
+          for (const d of rows) {
+            if (d.__t < x0 || d.__t > x1) continue;
+            const a = Math.abs(d.__t - t);
+            if (a < bestAbs) { bestAbs = a; best = d; }
+          }
+          return best;
+        }
+
+        // 7) bind events (ป้องกันซ้ำ)
+        const chartEl = getChartElement();
+        if (chartEl) {
+          chartEl.onclick = null;
+          chartEl.ondblclick = null;
+
+          chartEl.addEventListener('click', ev => {
+            const row = nearestRowFromClick(ev);
+            if (row) {
+              elHigh.textContent = fmt(+row.High);
+              elLow.textContent  = fmt(+row.Low);
+            }
+          });
+
+          chartEl.addEventListener('dblclick', () => {
+            resetIndicator();
+          });
+        }
+
+        // 8) อัปเดตเมื่อซูม/แพน
+        try {
+          const st = res.view.getState({signals:'raw'}) || {};
+          const sigs = Object.keys(st.signals || {});
+          const sig = sigs.find(n => /^zoom.*_x$/.test(n));
+          if (sig) {
+            res.view.removeSignalListener(sig, window.__indicatorZoomListener);
+            window.__indicatorZoomListener = () => resetIndicator();
+            res.view.addSignalListener(sig, window.__indicatorZoomListener);
+          }
+        } catch(e){}
+      }
+
+      window.currentPeriod = 'LIVE';
+      window.currentModel  = (document.getElementById('model-select')?.value) || 'All';
+      renderLiveTV({ symbol: 'TVC:GOLD', interval: '60' });
+
+      function renderForecastChart(period, model){
+        // Clear container before embedding new chart
+        document.getElementById('vega-chart-container').innerHTML = '';
+
+        // If-else logic for buttons and dropdown
+        if(period === 'LIVE'){
+          showLivePlaceholder();
+          return;
+        } else if(model === 'All'){
+          renderAllChart();
+          return;
+        } else {
+          // Valid period and model selected - load the chart
+          const m = model || window.currentModel;          
+          const url = `/chart/${encodeURIComponent(period)}/${encodeURIComponent(m)}.json`;
+          const opt = {
+            actions:{ export:true, source:false, compiled:false, editor:false },
+            theme:'dark', renderer:'canvas', hover:true,
+            tooltip:{ theme:'dark', format:'html' }
+          };
+
+          vegaEmbed('#vega-chart-container', url, opt)
+            .then(res => { 
+              currentView = res.view;
+              setupClickIndicator(res);  
+              setTimeout(()=>res.view.resize().run(), 80);
+            })
+            .catch(err=>{
+              console.error(err);
+              document.getElementById('vega-chart-container').innerHTML =
+                `<div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;">
+                   <p style="color:var(--negative-red);font-size:1.2rem;margin-bottom:10px;">Error loading chart for ${period} - ${m}</p>
+                   <p style="color:#99A1C4;font-size:.9rem;">URL: ${url}</p>
+                 </div>`;
+            });
+        }
+      }
+
+      function sanitizeSpecForAll(spec){
+        function walk(node){
+          if (!node || typeof node!=='object') return;
+
+          // (1) ลบ transform/filter ที่อาจซ่อน Historical
+          if (Array.isArray(node.transform)) {
+            node.transform = node.transform.filter(t => {
+              const s = String(t?.filter ?? t?.expr ?? '');
+              if (/Model\s*(!==|!=)\s*['"]Historical['"]/.test(s)) return false;
+              if (t && typeof t.filter === 'object' && t.filter.field === 'Model' && Array.isArray(t.filter.oneOf)) {
+                const hasHist = t.filter.oneOf.includes('Historical');
+                if (!hasHist) return false;
+              }
+              return true;
+            });
+          }
+
+          // (2) อย่าบังคับ x-scale domain (กันโดนบีบจนไม่เห็นเส้นยาวของ Historical)
+          if (node.encoding && node.encoding.x && node.encoding.x.scale && node.encoding.x.scale.domain){
+            delete node.encoding.x.scale.domain;
+          }
+
+          // เดินทุก child
+          ['layer','hconcat','vconcat','facet','spec','repeat'].forEach(k=>{
+            const v = node[k];
+            if (Array.isArray(v)) v.forEach(walk);
+            else if (v && typeof v==='object') walk(v);
+          });
+        }
+        walk(spec);
+        return spec;
+      }
+
+      async function renderAllChart() {
+        if (typeof showTV === 'function') showTV(false);
+
+        const url = currentJsonForAll() + '?t=' + Date.now(); // cache-buster
+        try {
+          const res  = await fetch(url, {cache:'no-store'});
+          if (!res.ok) throw new Error('Spec fetch failed: ' + res.status);
+          const spec = await res.json();
+
+          // สำคัญ: ล้างฟิลเตอร์/โดเมนที่ซ่อน Historic
+          const clean = sanitizeSpecForAll(spec);
+
+          // (กัน overlay/สไตล์) — เคลียร์และให้คอนเทนเนอร์มองเห็นได้แน่นอน
+          const el = document.querySelector('#vega-chart-container');
+          el.style.minHeight = '380px';
+          el.innerHTML = '';
+
+          await vegaEmbed('#vega-chart-container', clean, {
+            actions:{export:true, source:false, compiled:false, editor:false},
+            renderer:'canvas', theme:'dark', tooltip:{theme:'dark'}
+          });
+        } catch (e) {
+          console.error('ALL chart load failed:', e);
+          document.querySelector('#vega-chart-container').innerHTML =
+            `<div style="color:#ff6b6b;padding:12px;">โหลด ALL chart ไม่สำเร็จ<br>${url}</div>`;
+        }
+      }
+
+      function showTV(on){
+        const tv   = document.getElementById('tv-chart-container');
+        const vega = document.getElementById('vega-chart-container');
+        if (!tv || !vega) return;
+        tv.style.display   = on ? 'block' : 'none';
+        vega.style.display = on ? 'none'  : 'block';
+        setTimeout(()=>window.dispatchEvent(new Event('resize')),0);
+      }
+
+      let __tvScriptLoading = null;
+      function loadTVScriptOnce(){
+        if (window.TradingView) return Promise.resolve();
+        if (__tvScriptLoading)  return __tvScriptLoading;
+        __tvScriptLoading = new Promise((resolve,reject)=>{
+          const s=document.createElement('script');
+          s.src='https://s3.tradingview.com/tv.js';
+          s.async=true;
+          s.onload=resolve; s.onerror=()=>reject(new Error('Failed to load tv.js'));
+          document.head.appendChild(s);
+        });
+        return __tvScriptLoading;
+      }
+
+let __tvWidget = null;
+let __tvWidgetCreated = false;
+
+async function renderLiveTV({
+    containerId = 'tv-chart-container',
+    symbol = 'TVC:GOLD',
+    interval = '60',
+    timezone = 'Asia/Bangkok',
+    theme = 'dark',
+    locale = 'en'
+} = {}) {
+    showTV(true);
+    await loadTVScriptOnce();
+    
+    const el = document.getElementById(containerId);
+    if (!el) return;
+
+    // Clear previous widget if exists
+    if (__tvWidget) {
+        __tvWidget.remove();
+        __tvWidget = null;
+    }
+
+    el.innerHTML = '';
+
+    /* global TradingView */
+    __tvWidget = new TradingView.widget({
+        autosize: true,
+        symbol: symbol,
+        interval: interval,
+        timezone: timezone,
+        theme: theme,
+        style: "1",
+        locale: locale,
+        toolbar_bg: "#0F2043",
+        enable_publishing: false,
+        allow_symbol_change: false,
+        container_id: containerId,
+        height: "100%",
+        width: "100%",
+        hide_top_toolbar: false,
+        hide_side_toolbar: true,
+        withdateranges: true,
+        studies: [
+            "BB@tv-basicstudies",
+            "RSI@tv-basicstudies"
+        ],
+        show_popup_button: true,
+        popup_width: "1000",
+        popup_height: "650",
+        details: false,
+        hotlist: false,
+        calendar: false,
+        news: [
+            "headlines"
+        ]
+    });
+
+    __tvWidgetCreated = true;
+
+    // Force resize after a short delay to ensure proper rendering
+    setTimeout(() => {
+        window.dispatchEvent(new Event('resize'));
+    }, 100);
+
+    // Set up resize observer for the chart container
+    const holder = document.querySelector('.chart-placeholder');
+    if (holder && 'ResizeObserver' in window) {
+        const resizeObserver = new ResizeObserver(() => {
+            window.dispatchEvent(new Event('resize'));
+            // Force TradingView to recalculate its dimensions
+            if (__tvWidget && typeof __tvWidget.onResize === 'function') {
+                setTimeout(() => {
+                    __tvWidget.onResize();
+                }, 50);
+            }
+        });
+        resizeObserver.observe(holder);
+    }
+}
+
+      function leaveLive(period, model){
+        showTV(false);
+        // วาดกราฟเดิมของคุณ
+        if (typeof renderForecastChart === 'function'){
+          renderForecastChart(period, model);
+        }
+      }
+
+      async function renderLiveChart({
+        ticker = 'GC=F', 
+        interval = '1m',
+        period = '1d'
+        } = {}) {
+        const url = `/api/live-candles?ticker=${encodeURIComponent(ticker)}&interval=${encodeURIComponent(interval)}&period=${encodeURIComponent(period)}`;
+
+        try {
+            const res = await fetch(url);
+            const payload = await res.json();
+            if (!res.ok) throw new Error(payload.error || 'fetch failed');
+            const values = payload.data || [];
+
+            // สเปค candlestick (Vega-Lite)
+            const spec = {
+            $schema: "https://vega.github.io/schema/vega-lite/v5.json",
+            width: "container",
+            height: "container",
+            background: "transparent",
+            data: { values },
+            encoding: {
+                x: { field: "time", type: "temporal", title: null, axis:{format: "%H:%M"} }
+            },
+            layer: [
+                { // ไส้เทียน
+                mark: { type: "rule" },
+                encoding: {
+                    y: { field: "low",  type: "quantitative", title: "Price (USD)" },
+                    y2:{ field: "high" },
+                    color: { value: "#7dd3fc" }
+                }
+                },
+                { // แท่ง open-close
+                mark: { type: "bar" },
+                encoding: {
+                    y:  { field: "open",  type: "quantitative" },
+                    y2: { field: "close" },
+                    color: {
+                    condition: { test: "datum.close >= datum.open", value: "#4cc38a" }, // เขียวขึ้น
+                    value: "#e54d2e" // แดงลง
+                    },
+                    tooltip: [
+                    {field:"time", type:"temporal", title:"Time"},
+                    {field:"open",  type:"quantitative", title:"Open"},
+                    {field:"high",  type:"quantitative", title:"High"},
+                    {field:"low",   type:"quantitative", title:"Low"},
+                    {field:"close", type:"quantitative", title:"Close"},
+                    {field:"volume", type:"quantitative", title:"Vol"}
+                    ]
+                }
+                }
+            ]
+            };
+
+            await vegaEmbed('#vega-chart-container', spec, {
+              actions:{export:true, source:false, compiled:false, editor:false},
+              renderer:'canvas', theme:'dark', hover:true,
+              tooltip:{ theme:'dark', format:'html' }
+            }).then(r => {
+              setupClickIndicator({ view: r.view, spec });
+              setTimeout(() => r.view.resize().run(), 60);
+            });
+            
+        } catch(err) {
+            console.error(err);
+            document.getElementById('vega-chart-container').innerHTML =
+            `<div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;">
+                <p style="color:var(--negative-red);font-size:1.2rem;margin-bottom:10px;">Live chart error</p>
+                <p style="color:#99A1C4;font-size:.9rem;">${url}</p>
+            </div>`;
+        }
+    }
+
+      // --- map period -> time window ---
+      function getRangeForPeriod(period){
+        var now = new Date();
+        var ms =
+          period === '1H' ?   1*60*60*1000 :
+          period === '24H'?  24*60*60*1000 :
+          period === '1W' ?   7*24*60*60*1000 :
+          period === '1M' ?  30*24*60*60*1000 :
+          period === '3M' ?  90*24*60*60*1000 :
+                              180*24*60*60*1000; // default 6M
+        var startDt = new Date(now.getTime() - ms);
+        var endDt   = now;
+        function ymd(d){ return d.toISOString().slice(0,10); }
+        var isLong = (period === '1M' || period === '3M' || period === '6M');
+        return isLong
+          ? { start: ymd(startDt), end: ymd(endDt) }               // date-only
+          : { start: startDt.toISOString(), end: endDt.toISOString() }; // datetime
+      }
+
+      function currentJsonForAll(){
+        switch (window.currentPeriod) {
+          case '1H':  return '/static/chart/forecast_all_1H.json';
+          case '24H': return '/static/chart/forecast_all_24H.json';
+          case '1W':  return '/static/chart/forecast_all_1W.json';
+          case '1M':  return '/static/chart/forecast_all_1M.json';
+          case '3M':  return '/static/chart/forecast_all_3M.json';
+          case '6M':  return '/static/chart/forecast_all_6M.json';
+          default:    return '/static/chart/forecast_all_1W.json';
+        }
+      }
+
+      
+      function findDateExtentInSpec(spec){
+        const rows = [];
+        function walk(node){
+          if (!node || typeof node !== 'object') return;
+          if (node.data && Array.isArray(node.data.values)) rows.push(...node.data.values);
+          ['layer','hconcat','vconcat','facet','spec','repeat'].forEach(k=>{
+            const v = node[k];
+            if (Array.isArray(v)) v.forEach(walk);
+            else if (v && typeof v==='object') walk(v);
+          });
+        }
+        walk(spec);
+        if (spec.datasets){
+          for (const k in spec.datasets){
+            if (Array.isArray(spec.datasets[k])) rows.push(...spec.datasets[k]);
+          }
+        }
+        if (!rows.length) return null;
+
+        const dateFields = ['Date','date','Datetime','datetime','time','timestamp','ds'];
+        const toDate = (v)=>{
+          if (v == null) return null;
+          const s = String(v);
+          // หากไม่มีเวลาให้เติมเที่ยงคืน (Z)
+          return new Date(s.includes('T') ? s : (s + 'T00:00:00Z'));
+        };
+
+        let min=null, max=null;
+        for (const r of rows){
+          let d=null;
+          for (const f of dateFields){
+            if (r[f] != null){ d = toDate(r[f]); break; }
+          }
+          if (!d || isNaN(d)) continue;
+          if (!min || d<min) min=d;
+          if (!max || d>max) max=d;
+        }
+        if (!min || !max) return null;
+        return {min, max};
+      }
+
+      // รับ durationMs (หน้าต่างปุ่ม) แล้วคืน [start, end] ที่ทับช่วงข้อมูลแน่ๆ
+      function calcClippedDomain(ext, durationMs){
+        const start = new Date(ext.min.getTime());                 // ยึดต้นข้อมูล
+        const end   = new Date(start.getTime() + durationMs);      // บวกตามปุ่ม
+
+        // ถ้าเกินข้อมูล ให้ตัดไม่ให้เลยปลายสุด
+        const clippedEnd = end > ext.max ? new Date(ext.max.getTime()) : end;
+
+        // กันกรณีข้อมูลสั้นกว่า duration มาก ๆ → ใช้ทั้งช่วง [min, max]
+        if (clippedEnd <= start) {
+          return [ext.min, ext.max];
+        }
+        return [start, clippedEnd];
+      }
+
+      // ระยะเวลาเป็น ms ตามปุ่ม
+      function durationMsFor(period){
+        return ({
+          '1H' : 1  * 60 * 60 * 1000,
+          '24H': 24 * 60 * 60 * 1000,
+          '1W' : 7  * 24 * 60 * 60 * 1000,
+          '1M' : 30 * 24 * 60 * 60 * 1000,
+          '3M' : 90 * 24 * 60 * 60 * 1000,
+          '6M' : 180* 24 * 60 * 60 * 1000,
+        }[period]) || (7*24*60*60*1000);
+      }
+
+      // --- fetch spec, cut [start,end], fix x-domain, render ---
+      async function renderSpecWithRange(url /*, startISO, endISO */){
+        if (typeof showTV === 'function') showTV(false);
+
+        const res = await fetch(url + (url.indexOf('?')>-1 ? '&' : '?') + 't=' + Date.now(), { cache:'no-store' });
+        if (!res.ok) throw new Error('Spec fetch failed: ' + res.status);
+        const spec = await res.json();
+
+        const period = String(window.currentPeriod || '').trim();
+
+        // --- ธีม (คงเดิม) ---
+        spec.config = spec.config || {};
+        spec.config.background = spec.config.background || '#0f1115';
+        spec.config.view = { ...(spec.config.view||{}), stroke: '#223245' };
+        spec.config.axis = {
+          ...(spec.config.axis||{}),
+          labelColor:'#a7b4c8', titleColor:'#a7b4c8',
+          labelFontSize:12, titleFontSize:14,
+          domainColor:'#223245', tickColor:'#223245',
+          grid:true, gridColor:'#273a50', gridOpacity:1, gridWidth:1, gridDash:[0],
+        };
+        spec.config.legend = { ...(spec.config.legend||{}), labelColor:'#a7b4c8', titleColor:'#a7b4c8' };
+        spec.config.title  = { ...(spec.config.title ||{}),  color:'#a7b4c8' };
+
+        // --- ถ้าเป็น 1W หรือ 6M -> ไม่ตัดเลย ---
+        if (period === '1W' || period === '6M') {
+          // ลบ domain ที่อาจล็อกช่วงไว้ (กันโดนบีบ)
+          (function clearDomain(node){
+            if (!node || typeof node !== 'object') return;
+            if (node.encoding && node.encoding.x && node.encoding.x.scale && node.encoding.x.scale.domain){
+              delete node.encoding.x.scale.domain;
+            }
+            ['layer','hconcat','vconcat','facet','spec','repeat'].forEach(k=>{
+              const v = node[k];
+              if (Array.isArray(v)) v.forEach(clearDomain);
+              else if (v && typeof v==='object') clearDomain(v);
+            });
+          })(spec);
+
+          const el = document.getElementById('vega-chart-container');
+          el.innerHTML = '';
+          await vegaEmbed(el, spec, {
+            actions:{ export:true, source:false, compiled:false, editor:false },
+            renderer:'canvas', theme:'dark', tooltip:{ theme:'dark' }
+          });
+          return;
+        }
+
+        // --- ช่วงอื่น ๆ: ตัดจาก "ต้นข้อมูล" ตามจำนวนแถวแรก ---
+        const N = ({
+          '1H':  24,
+          '24H': 24,
+          '1M':  30,
+          '3M':  90,
+        })[period] || 7;
+
+        function findDateField(node){
+          if (node?.encoding?.x && typeof node.encoding.x === 'object' && node.encoding.x.field){
+            return node.encoding.x.field;
+          }
+          return 'Date';
+        }
+
+        function injectFirstN(node){
+          if (!node || typeof node !== 'object') return;
+
+          const isUnit = !!(node.mark || node.encoding);
+          if (isUnit){
+            const dateField = findDateField(node);
+            node.transform = node.transform || [];
+            node.transform = node.transform.filter(t => !(t.window && t.window.some(w => w.as === '__r_firstN')));
+            node.transform.unshift(
+              { sort: [{ field: dateField, order: 'ascending' }] },
+              { window: [{ op: 'row_number', as: '__r_firstN' }] },
+              { filter: `datum.__r_firstN <= ${N}` }
+            );
+            // อย่าล็อก domain
+            if (node.encoding?.x?.scale?.domain) delete node.encoding.x.scale.domain;
+          }
+
+          ['layer','hconcat','vconcat','facet','spec','repeat'].forEach(k=>{
+            const v = node[k];
+            if (Array.isArray(v)) v.forEach(injectFirstN);
+            else if (v && typeof v==='object') injectFirstN(v);
+          });
+        }
+        injectFirstN(spec);
+
+        const el = document.getElementById('vega-chart-container');
+        el.innerHTML = '';
+        await vegaEmbed(el, spec, {
+          actions:{ export:true, source:false, compiled:false, editor:false },
+          renderer:'canvas', theme:'dark', tooltip:{ theme:'dark' }
+        });
+      }
+
+      // --- central: pick URL from currentPeriod/currentModel then cut ---
+      async function renderCurrentWithButtonRange(){
+        if (window.currentPeriod === 'LIVE') { renderLiveTV(); return; }
+
+        if (window.currentModel === 'All') {
+          // ❌ ห้ามเรียก renderSpecWithRange()/renderSpecCutFromEnd() ที่นี่
+          await renderAllChart();
+          return;
+        }
+
+        // โมเดลเดี่ยว → ใช้ endpoint เดิม + ตัดช่วงให้ตรงปุ่ม
+        const rng = getRangeForPeriod(window.currentPeriod);
+        const url = '/chart/' + encodeURIComponent(window.currentPeriod)
+                            + '/' + encodeURIComponent(window.currentModel) + '.json';
+        await renderSpecWithRange(url, rng.start, rng.end);
+      }
+
+      // period buttons
+      var tagButtons = document.querySelectorAll('.tag-buttons .btn-period');
+      tagButtons.forEach(function(btn){
+        btn.addEventListener('click', async function(){
+          window.currentPeriod = btn.dataset.period || btn.textContent.trim();   // ← ใช้ window.
+
+          tagButtons.forEach(function(b){ b.classList.remove('active'); });
+          btn.classList.add('active');
+
+          if (window.currentPeriod === 'LIVE') {                                  // ← ใช้ window.
+            renderLiveTV();
+            return;
+          }
+          try {
+            await renderCurrentWithButtonRange();
+          } catch (e) {
+            console.error(e);
+            document.getElementById('vega-chart-container').innerHTML =
+              '<div style="color:#ff6b6b;padding:12px;">Failed to render range</div>';
+          }
+        });
+      });
+
+      // model dropdown
+      const modelSel = document.getElementById('model-select');
+      window.currentModel = modelSel.value || 'All';                               // ← ใช้ window.
+
+      modelSel.addEventListener('change', async function(e){
+        window.currentModel = e.target.value;                                      // ← ใช้ window.
+        if (window.currentPeriod === 'LIVE') {
+          renderLiveTV();
+        } else {
+          try { await renderCurrentWithButtonRange(); } catch(e){ console.error(e); }
+        }
+      });
+
+      window.currentPeriod = 'LIVE';
+      renderLiveTV({ symbol: 'TVC:GOLD', interval: '60' });
+      const liveBtn = document.querySelector('.btn-period[data-period="LIVE"]');
+      const url = `/chart/${window.currentPeriod}/All.json?t=${Date.now()}`;
+      if (liveBtn) { document.querySelectorAll('.btn-period').forEach(b=>b.classList.remove('active')); liveBtn.classList.add('active'); }
+
+      // init
+      updateLocalTime();
+      fetchGoldPrice();
+      if (window.currentPeriod !== 'LIVE') {
+        renderCurrentWithButtonRange();
+      }
+
+      setInterval(()=>{ updateLocalTime(); fetchGoldPrice(); }, 10000);
+    });
+  </script>
+</body>
+</html>
