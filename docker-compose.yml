@@ -1,0 +1,189 @@
+services:
+  postgres:
+    image: postgres:14
+    container_name: postgres
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [backend]
+
+  spark-master:
+    build: ./spark  # เพิ่มบรรทัดนี้
+    # image: bitnami/spark:3.5
+    container_name: spark-master
+    environment:
+      - SPARK_MODE=master
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - TZ=${TZ}
+    volumes:
+      - ./spark_jobs:/opt/spark-apps
+      - ./data:/opt/shared-data
+      - ./artifacts:/opt/artifacts
+    ports:
+      - "7077:7077"
+      - "${SPARK_MASTER_UI_PORT}:8080"
+    networks: [backend]
+
+  spark-worker:
+    build: ./spark  # เพิ่มบรรทัดนี้
+    # image: bitnami/spark:3.5
+    container_name: spark-worker
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=2G
+      - SPARK_WORKER_CORES=2
+      - TZ=${TZ}
+    depends_on: [spark-master]
+    volumes:
+      - ./spark_jobs:/opt/spark-apps
+      - ./data:/opt/shared-data
+      - ./artifacts:/opt/artifacts
+    networks: [backend]
+
+  airflow-init:
+    build: ./airflow        # << ใช้อิมเมจที่เรา build
+    image: local/airflow:2.10.2-py3.11
+    container_name: airflow-init
+    env_file: .env
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__CORE__DEFAULT_TIMEZONE=Asia/Bangkok
+      - AIRFLOW__WEBSERVER__SECRET_KEY=supersecret
+      - _AIRFLOW_WWW_USER_CREATE=true
+      - _AIRFLOW_WWW_USER_USERNAME=${AIRFLOW_ADMIN_USER}
+      - _AIRFLOW_WWW_USER_PASSWORD=${AIRFLOW_ADMIN_PASSWORD}
+      - _AIRFLOW_WWW_USER_FIRSTNAME=${AIRFLOW_ADMIN_FIRSTNAME}
+      - _AIRFLOW_WWW_USER_LASTNAME=${AIRFLOW_ADMIN_LASTNAME}
+      - _AIRFLOW_WWW_USER_EMAIL=${AIRFLOW_ADMIN_EMAIL}
+      # - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN}
+      # - _PIP_ADDITIONAL_REQUIREMENTS=apache-airflow-providers-apache-spark==4.10.0
+      - TZ=${TZ}
+    user: "50000:0"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./jobs:/opt/jobs
+      - ./spark_jobs:/opt/spark-apps
+      - ./artifacts:/opt/artifacts
+      - ./data:/opt/shared-data
+      - ./requirements.txt:/requirements.txt
+      - airflow_logs:/opt/airflow/logs
+    
+    entrypoint: /bin/bash
+    command: -lc "
+      airflow db init && \
+      airflow users create \
+        --username ${AIRFLOW_ADMIN_USER} \
+        --password ${AIRFLOW_ADMIN_PASSWORD} \
+        --firstname ${AIRFLOW_ADMIN_FIRSTNAME} \
+        --lastname ${AIRFLOW_ADMIN_LASTNAME} \
+        --role Admin \
+        --email ${AIRFLOW_ADMIN_EMAIL}
+      "
+    networks: [backend]
+
+  airflow-webserver:
+    image: local/airflow:2.10.2-py3.11   # << ใช้อิมเมจเดียวกัน
+    container_name: airflow-webserver
+    env_file: .env
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - PYTHONPATH="/opt/jobs"         # ถ้าคุณมีสคริปต์ train/predict ใน /opt/jobs
+      - AIRFLOW__CORE__DEFAULT_TIMEZONE=Asia/Bangkok
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN}
+      - TZ=${TZ}
+      - MODEL_DIR=/opt/artifacts/model/long
+      - OUT_DIR=/opt/artifacts/forecasts/long
+      - MODEL_DIRs=/opt/artifacts/model/short
+      - OUT_DIRs=/opt/artifacts/forecasts/short
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    user: "50000:0"
+    command: webserver        # << กลับมาใช้คำสั่งมาตรฐาน
+    ports:
+      - "${AIRFLOW_WEB_PORT}:8080"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./jobs:/opt/jobs
+      - ./spark_jobs:/opt/spark-apps
+      - ./artifacts:/opt/artifacts
+      - ./data:/opt/shared-data
+      - airflow_logs:/opt/airflow/logs
+    networks: [backend]
+
+  airflow-scheduler:
+    image: local/airflow:2.10.2-py3.11
+    container_name: airflow-scheduler
+    env_file: .env
+    environment:
+      - PYTHONPATH="/opt/jobs"         # ถ้าคุณมีสคริปต์ train/predict ใน /opt/jobs
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__CORE__DEFAULT_TIMEZONE=Asia/Bangkok
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN}
+      - TZ=${TZ}
+      - MODEL_DIR=/opt/artifacts/model/long
+      - OUT_DIR=/opt/artifacts/forecasts/long
+      - MODEL_DIRs=/opt/artifacts/model/short
+      - OUT_DIRs=/opt/artifacts/forecasts/short
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-webserver:
+        condition: service_started
+    user: "50000:0"
+    command: scheduler        # << คำสั่งมาตรฐาน
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./jobs:/opt/jobs
+      - ./spark_jobs:/opt/spark-apps
+      - ./artifacts:/opt/artifacts
+      - ./data:/opt/shared-data
+      - airflow_logs:/opt/airflow/logs
+    networks: [backend]
+
+  web:  # << ต้องอยู่ในระดับเดียวกับ services อื่น
+    build: ./web
+    image: myapp:1.0
+    container_name: flask-ui
+    ports:
+      - "5000:5000"
+    environment:
+      ARTIFACTS_DIR: /opt/artifacts
+      MODEL_DIR_LONG: /opt/artifacts/model/long
+      MODEL_DIR_SHORT: /opt/artifacts/model/short
+      DEFAULT_TICKER: GC=F
+      LOOKBACK_DEFAULT_LONG: "60"
+      LOOKBACK_DEFAULT_SHORT: "60"
+    volumes:
+      - "./artifacts:/opt/artifacts:ro"
+    networks:
+      - backend  # << ใช้ network เดียวกันเพื่อเชื่อมต่อกับ services อื่น
+    restart: unless-stopped
+
+
+volumes:
+  pg_data:
+  airflow_logs:
+
+networks:
+  backend:
