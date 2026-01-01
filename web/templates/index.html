@@ -176,7 +176,7 @@
         align-items: center;
         gap: 10px;
         font-weight: 700;
-        font-size: 1.5rem;
+        font-size: 2rem;
     }
     .header svg {
         width: 30px;
@@ -506,8 +506,6 @@
         <h3>Current Gold Price</h3>
         <p id="current-price" class="price">Failed to fetch price</p>
         <p id="price-timestamp" class="timestamp"></p>
-        <p id="pred-1h"></p>
-        <p id="pred-24h"></p>
       </div>
 
       <div>
@@ -1111,168 +1109,304 @@ async function renderLiveTV({
         }
       }
 
-      
-      function findDateExtentInSpec(spec){
-        const rows = [];
-        function walk(node){
-          if (!node || typeof node !== 'object') return;
-          if (node.data && Array.isArray(node.data.values)) rows.push(...node.data.values);
-          ['layer','hconcat','vconcat','facet','spec','repeat'].forEach(k=>{
-            const v = node[k];
-            if (Array.isArray(v)) v.forEach(walk);
-            else if (v && typeof v==='object') walk(v);
-          });
-        }
-        walk(spec);
-        if (spec.datasets){
-          for (const k in spec.datasets){
-            if (Array.isArray(spec.datasets[k])) rows.push(...spec.datasets[k]);
-          }
-        }
-        if (!rows.length) return null;
-
-        const dateFields = ['Date','date','Datetime','datetime','time','timestamp','ds'];
-        const toDate = (v)=>{
-          if (v == null) return null;
-          const s = String(v);
-          // หากไม่มีเวลาให้เติมเที่ยงคืน (Z)
-          return new Date(s.includes('T') ? s : (s + 'T00:00:00Z'));
-        };
-
-        let min=null, max=null;
-        for (const r of rows){
-          let d=null;
-          for (const f of dateFields){
-            if (r[f] != null){ d = toDate(r[f]); break; }
-          }
-          if (!d || isNaN(d)) continue;
-          if (!min || d<min) min=d;
-          if (!max || d>max) max=d;
-        }
-        if (!min || !max) return null;
-        return {min, max};
-      }
-
-      // รับ durationMs (หน้าต่างปุ่ม) แล้วคืน [start, end] ที่ทับช่วงข้อมูลแน่ๆ
-      function calcClippedDomain(ext, durationMs){
-        const start = new Date(ext.min.getTime());                 // ยึดต้นข้อมูล
-        const end   = new Date(start.getTime() + durationMs);      // บวกตามปุ่ม
-
-        // ถ้าเกินข้อมูล ให้ตัดไม่ให้เลยปลายสุด
-        const clippedEnd = end > ext.max ? new Date(ext.max.getTime()) : end;
-
-        // กันกรณีข้อมูลสั้นกว่า duration มาก ๆ → ใช้ทั้งช่วง [min, max]
-        if (clippedEnd <= start) {
-          return [ext.min, ext.max];
-        }
-        return [start, clippedEnd];
-      }
-
-      // ระยะเวลาเป็น ms ตามปุ่ม
-      function durationMsFor(period){
-        return ({
-          '1H' : 1  * 60 * 60 * 1000,
-          '24H': 24 * 60 * 60 * 1000,
-          '1W' : 7  * 24 * 60 * 60 * 1000,
-          '1M' : 30 * 24 * 60 * 60 * 1000,
-          '3M' : 90 * 24 * 60 * 60 * 1000,
-          '6M' : 180* 24 * 60 * 60 * 1000,
-        }[period]) || (7*24*60*60*1000);
-      }
-
       // --- fetch spec, cut [start,end], fix x-domain, render ---
-      async function renderSpecWithRange(url /*, startISO, endISO */){
+      async function renderSpecWithRange(url, startISO, endISO){
+          if (typeof showTV === 'function') showTV(false);
+
+          const res = await fetch(url + (url.indexOf('?')>-1 ? '&' : '?') + 't=' + Date.now(), { cache:'no-store' });
+          if (!res.ok) throw new Error('Spec fetch failed: ' + res.status);
+          const spec = await res.json();
+
+          // Debug: Log original data count
+          function* rowsOf(node){
+              if (!node || typeof node !== 'object') return;
+              if (node.data && Array.isArray(node.data.values)) yield* node.data.values;
+              const keys = ['layer','hconcat','vconcat','facet','spec','repeat'];
+              for (let k of keys){
+                  if (Array.isArray(node[k])) for (let n of node[k]) yield* rowsOf(n);
+                  else if (node[k] && typeof node[k] === 'object') yield* rowsOf(node[k]);
+              }
+          }
+          
+          const all = [];
+          for (const r of rowsOf(spec)) all.push(r);
+          if (spec.datasets) {
+              for (const k in spec.datasets) if (Array.isArray(spec.datasets[k])) all.push(...spec.datasets[k]);
+          }
+          
+          console.log(`[DEBUG] Total rows before filtering: ${all.length}`);
+          console.log(`[DEBUG] Period: ${window.currentPeriod}, URL: ${url}`);
+          
+          const toJS = (v)=>{ 
+              if(v==null) return null; 
+              const s=String(v); 
+              return new Date(s.indexOf('T')>=0 ? s : s+'T00:00:00Z'); 
+          };
+          
+          let dataMax = null;
+          for (const r of all){
+              const v = r && (r.Date != null ? r.Date : r.time);
+              const d = toJS(v);
+              if (d && (!dataMax || d > dataMax)) dataMax = d;
+          }
+          
+          console.log(`[DEBUG] Max date in data: ${dataMax}`);
+          console.log(`[DEBUG] Requested range: ${startISO} to ${endISO}`);
+
+          // FIX: Use the provided range for short periods, don't recalculate
+          const p = String(window.currentPeriod || '').trim();
+          const isLong = (p === '1M' || p === '3M' || p === '6M');
+          
+          let startB, endB, xStart, xEnd;
+          
+          if (isLong && dataMax){
+              // Only use the long-period logic for actual long periods
+              const dayMs = 24*60*60*1000;
+              const lookback = (p==='1M'?30:p==='3M'?90:180)*dayMs;
+              const end = new Date(Date.UTC(dataMax.getUTCFullYear(), dataMax.getUTCMonth(), dataMax.getUTCDate()+1, 0,0,0));
+              const start = new Date(end.getTime() - lookback);
+              startB = start; 
+              endB = end;
+              xStart = start.toISOString().slice(0,10);
+              xEnd = new Date(end.getTime()-1).toISOString().slice(0,10);
+          } else {
+              // For short periods (1H, 24H, 1W), use the provided range directly
+              startB = new Date(startISO);
+              endB = new Date(endISO);
+              xStart = startB.toISOString();
+              xEnd = endB.toISOString();
+          }
+          
+          console.log(`[DEBUG] Final range: ${xStart} to ${xEnd}`);
+          console.log(`[DEBUG] isLong: ${isLong}`);
+
+          // Fix the filtering logic
+          function keepRow(r){
+              if (!r) return false;
+              const raw = (r.Date != null ? r.Date : r.time);
+              if (raw == null) return true; // keep undated rows
+              
+              const d = toJS(raw);
+              if (!d) return false;
+              
+              if (isLong){
+                  const day = new Date(d.toISOString().slice(0,10)+'T00:00:00Z');
+                  return (day >= startB && day < endB);
+              }
+              
+              // For short periods, use direct date comparison
+              return (d >= startB && d <= endB);
+          }
+
+          let keptRows = 0;
+          const filterValues = (arr) => {
+              if (!Array.isArray(arr)) return arr;
+              const filtered = arr.filter(r => {
+                  const keep = keepRow(r);
+                  if (keep) keptRows++;
+                  return keep;
+              });
+              return filtered;
+          };
+
+          function walk(node){
+              if (!node || typeof node !== 'object') return;
+              
+              if (node.data && Array.isArray(node.data.values)){
+                  const originalCount = node.data.values.length;
+                  node.data.values = filterValues(node.data.values);
+                  console.log(`[DEBUG] Filtered dataset: ${originalCount} -> ${node.data.values.length} rows`);
+              }
+              
+              if (node.encoding && node.encoding.x){
+                  node.encoding.x.scale = Object.assign({}, node.encoding.x.scale || {}, { 
+                      domain: [xStart, xEnd] 
+                  });
+              }
+              
+              const keys = ['layer','hconcat','vconcat','facet','spec','repeat'];
+              for (let k of keys){
+                  if (Array.isArray(node[k])) node[k].forEach(walk);
+                  else if (node[k] && typeof node[k] === 'object') walk(node[k]);
+              }
+          }
+          
+          walk(spec);
+          
+          if (spec.datasets){
+              for (const k in spec.datasets){
+                  if (Array.isArray(spec.datasets[k])) {
+                      const originalCount = spec.datasets[k].length;
+                      spec.datasets[k] = filterValues(spec.datasets[k]);
+                      console.log(`[DEBUG] Filtered dataset ${k}: ${originalCount} -> ${spec.datasets[k].length} rows`);
+                  }
+              }
+          }
+          
+          console.log(`[DEBUG] Total rows kept after filtering: ${keptRows}`);
+
+        // dark theme fallback (keeps labels white)
+        spec.config = spec.config || {};
+        spec.config.axis = Object.assign({
+          labelColor:'#ecf0f1', titleColor:'#ecf0f1',
+          gridColor:'#34495e',  domainColor:'#7f8c8d', tickColor:'#7f8c8d'
+        }, spec.config.axis || {});
+        spec.config.legend = Object.assign({ labelColor:'#ecf0f1', titleColor:'#ecf0f1' }, spec.config.legend || {});
+        spec.config.title  = Object.assign({ color:'#ecf0f1' }, spec.config.title  || {});
+
+        await vegaEmbed('#vega-chart-container', spec, {
+          actions:{ export:true, source:false, compiled:false, editor:false },
+          renderer:'canvas',
+          theme:'dark',
+          tooltip:{ theme:'dark' }
+        });
+      }
+
+      async function renderSpecCutFromEnd(url, periodStr){
         if (typeof showTV === 'function') showTV(false);
 
-        const res = await fetch(url + (url.indexOf('?')>-1 ? '&' : '?') + 't=' + Date.now(), { cache:'no-store' });
-        if (!res.ok) throw new Error('Spec fetch failed: ' + res.status);
+        const res = await fetch(url + (url.includes('?')?'&':'?') + 't=' + Date.now(), {cache:'no-store'});
+        if (!res.ok) throw new Error('Spec fetch failed: '+res.status);
         const spec = await res.json();
 
-        const period = String(window.currentPeriod || '').trim();
-
-        // --- ธีม (คงเดิม) ---
-        spec.config = spec.config || {};
-        spec.config.background = spec.config.background || '#0f1115';
-        spec.config.view = { ...(spec.config.view||{}), stroke: '#223245' };
-        spec.config.axis = {
-          ...(spec.config.axis||{}),
-          labelColor:'#a7b4c8', titleColor:'#a7b4c8',
-          labelFontSize:12, titleFontSize:14,
-          domainColor:'#223245', tickColor:'#223245',
-          grid:true, gridColor:'#273a50', gridOpacity:1, gridWidth:1, gridDash:[0],
-        };
-        spec.config.legend = { ...(spec.config.legend||{}), labelColor:'#a7b4c8', titleColor:'#a7b4c8' };
-        spec.config.title  = { ...(spec.config.title ||{}),  color:'#a7b4c8' };
-
-        // --- ถ้าเป็น 1W หรือ 6M -> ไม่ตัดเลย ---
-        if (period === '1W' || period === '6M') {
-          // ลบ domain ที่อาจล็อกช่วงไว้ (กันโดนบีบ)
-          (function clearDomain(node){
-            if (!node || typeof node !== 'object') return;
-            if (node.encoding && node.encoding.x && node.encoding.x.scale && node.encoding.x.scale.domain){
-              delete node.encoding.x.scale.domain;
-            }
-            ['layer','hconcat','vconcat','facet','spec','repeat'].forEach(k=>{
-              const v = node[k];
-              if (Array.isArray(v)) v.forEach(clearDomain);
-              else if (v && typeof v==='object') clearDomain(v);
-            });
-          })(spec);
-
-          const el = document.getElementById('vega-chart-container');
-          el.innerHTML = '';
-          await vegaEmbed(el, spec, {
-            actions:{ export:true, source:false, compiled:false, editor:false },
-            renderer:'canvas', theme:'dark', tooltip:{ theme:'dark' }
-          });
-          return;
-        }
-
-        // --- ช่วงอื่น ๆ: ตัดจาก "ต้นข้อมูล" ตามจำนวนแถวแรก ---
-        const N = ({
-          '1H':  24,
-          '24H': 24,
-          '1M':  30,
-          '3M':  90,
-        })[period] || 7;
-
-        function findDateField(node){
-          if (node?.encoding?.x && typeof node.encoding.x === 'object' && node.encoding.x.field){
-            return node.encoding.x.field;
-          }
-          return 'Date';
-        }
-
-        function injectFirstN(node){
+        function* rowsOf(node){
           if (!node || typeof node !== 'object') return;
+          if (node.data && Array.isArray(node.data.values)) yield* node.data.values;
+          const ks = ['layer','hconcat','vconcat','facet','spec','repeat'];
+          for (const k of ks){
+            if (Array.isArray(node[k])) for (const n of node[k]) yield* rowsOf(n);
+            else if (node[k] && typeof node[k]==='object') yield* rowsOf(node[k]);
+          }
+        }
+        const all = [];
+        for (const r of rowsOf(spec)) all.push(r);
+        if (spec.datasets){
+          for (const k in spec.datasets){
+            if (Array.isArray(spec.datasets[k])) all.push(...spec.datasets[k]);
+          }
+        }
+        if (!all.length) throw new Error('No data rows in spec');
 
-          const isUnit = !!(node.mark || node.encoding);
-          if (isUnit){
-            const dateField = findDateField(node);
-            node.transform = node.transform || [];
-            node.transform = node.transform.filter(t => !(t.window && t.window.some(w => w.as === '__r_firstN')));
-            node.transform.unshift(
-              { sort: [{ field: dateField, order: 'ascending' }] },
-              { window: [{ op: 'row_number', as: '__r_firstN' }] },
-              { filter: `datum.__r_firstN <= ${N}` }
-            );
-            // อย่าล็อก domain
-            if (node.encoding?.x?.scale?.domain) delete node.encoding.x.scale.domain;
+        const toDate = v => {
+          if (v==null) return null;
+          const s = String(v);
+          return new Date(s.includes('T') ? s : (s + 'T00:00:00Z'));
+        };
+        let dataMax = null;
+        for (const r of all){
+          const raw = r.Date ?? r.time;
+          const d = toDate(raw);
+          if (d && (!dataMax || d > dataMax)) dataMax = d;
+        }
+        if (!dataMax) throw new Error('Cannot detect max date');
+
+        const p = String(periodStr||'').trim();
+        const day = 24*60*60*1000, hour = 60*60*1000;
+        const lookbackMs =
+            p==='1H' ? 1*hour :
+            p==='24H'? 24*hour :
+            p==='1W' ? 7*day  :
+            p==='1M' ? 30*day :
+            p==='3M' ? 90*day :
+                      180*day; // 6M
+        const isLong = (p==='1M'||p==='3M'||p==='6M');
+
+        let startB, endB, xStart, xEnd;
+        if (isLong){
+          const end = new Date(Date.UTC(
+            dataMax.getUTCFullYear(), dataMax.getUTCMonth(), dataMax.getUTCDate()+1, 0,0,0
+          ));
+          const start = new Date(end.getTime() - lookbackMs);
+          startB = start; endB = end;
+          xStart = start.toISOString().slice(0,10);                 
+          xEnd   = new Date(end.getTime()-1).toISOString().slice(0,10);
+        }else{
+          const end = dataMax;
+          const start = new Date(end.getTime() - lookbackMs);
+          startB = start; endB = end;
+          xStart = start.toISOString();
+          xEnd   = end.toISOString();
+        }
+
+        const keepRow = (r)=>{
+          if (!r) return false;
+          const raw = r.Date ?? r.time;
+          if (raw == null) return true;
+          const d = toDate(raw);
+          if (!d) return false;
+          if (isLong){
+            const dayOnly = new Date(d.toISOString().slice(0,10)+'T00:00:00Z');
+            return (dayOnly >= startB && dayOnly < (endB)); 
+          }
+          return (d >= startB && d <= endB);               
+        };
+        const filterValues = (arr)=> Array.isArray(arr) ? arr.filter(keepRow) : arr;
+
+        function tuneNode(node){
+          if (!node || typeof node!=='object') return;
+
+          if (node.data && Array.isArray(node.data.values)){
+            node.data.values = filterValues(node.data.values);
           }
 
-          ['layer','hconcat','vconcat','facet','spec','repeat'].forEach(k=>{
-            const v = node[k];
-            if (Array.isArray(v)) v.forEach(injectFirstN);
-            else if (v && typeof v==='object') injectFirstN(v);
-          });
-        }
-        injectFirstN(spec);
+          if (node.encoding && node.encoding.x){
+            const xEnc = node.encoding.x;
+            xEnc.scale = Object.assign({}, xEnc.scale||{}, { domain:[xStart, xEnd] });
 
-        const el = document.getElementById('vega-chart-container');
-        el.innerHTML = '';
-        await vegaEmbed(el, spec, {
-          actions:{ export:true, source:false, compiled:false, editor:false },
-          renderer:'canvas', theme:'dark', tooltip:{ theme:'dark' }
+            if (isLong){
+              xEnc.timeUnit = 'yearmonthdate';
+              xEnc.axis = Object.assign({}, xEnc.axis||{}, { format: '%Y-%m-%d', tickCount: 8 });
+            }else{
+              delete xEnc.timeUnit;
+              xEnc.axis = Object.assign({}, xEnc.axis||{}, { format: '%Y-%m-%d %H:%M', tickCount: 8 });
+            }
+            node.encoding.x = xEnc;
+          }
+
+          if (node.encoding && Array.isArray(node.encoding.tooltip)){
+            node.encoding.tooltip = node.encoding.tooltip.map(t=>{
+              if (t && (t.field==='Date' || t.field==='time') && (t.type==='temporal' || t.type==='T' || t.type==='temporal')){
+                const fmt = isLong ? '%Y-%m-%d' : '%Y-%m-%d %H:%M';
+                return Object.assign({}, t, { format: fmt });
+              }
+              return t;
+            });
+          }
+
+          if (node.mark){
+            const mark = (typeof node.mark === 'string') ? {type: node.mark} : Object.assign({}, node.mark);
+            if ((mark.type||'').toLowerCase()==='line'){
+              if (isLong){
+                mark.point = Object.assign({ filled: true, size: 30 }, (mark.point||{}));
+              }else{
+                if (mark.point) delete mark.point;
+              }
+            }
+            node.mark = mark.type ? mark : node.mark;
+          }
+
+          const ks = ['layer','hconcat','vconcat','facet','spec','repeat'];
+          for (const k of ks){
+            if (Array.isArray(node[k])) node[k].forEach(tuneNode);
+            else if (node[k] && typeof node[k]==='object') tuneNode(node[k]);
+          }
+        }
+        tuneNode(spec);
+
+        if (spec.datasets){
+          for (const k in spec.datasets){
+            if (Array.isArray(spec.datasets[k])) spec.datasets[k] = filterValues(spec.datasets[k]);
+          }
+        }
+
+        spec.config = spec.config || {};
+        spec.config.axis   = Object.assign({labelColor:'#ecf0f1', titleColor:'#ecf0f1'}, spec.config.axis||{});
+        spec.config.legend = Object.assign({labelColor:'#ecf0f1', titleColor:'#ecf0f1'}, spec.config.legend||{});
+        spec.config.title  = Object.assign({color:'#ecf0f1'}, spec.config.title||{});
+
+        await vegaEmbed('#vega-chart-container', spec, {
+          actions:{export:true, source:false, compiled:false, editor:false},
+          renderer:'canvas', theme:'dark', tooltip:{theme:'dark'}
         });
       }
 
