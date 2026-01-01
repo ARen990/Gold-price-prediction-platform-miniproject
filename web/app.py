@@ -131,7 +131,6 @@ def _no_cache_response(file_path: str):
     resp.headers["Expires"] = "0"
     return resp
 
-
 # ---------------- Routes ----------------
 @app.route("/")
 def home():
@@ -399,24 +398,6 @@ def chart_by_period_model(period, model):
     """
     model_norm = _normalize_model_key(period, model)
 
-    # ---- ALL models line chart ----
-    # if model_norm == "ALL":
-    #     is_short = (period or "").upper() in SHORT_PERIODS
-    #     inputs_map = ALL_INPUTS_SHORT if is_short else ALL_INPUTS_LONG
-    #     out_path   = ALL_OUT_SHORT  if is_short else ALL_OUT_LONG
-
-    #     print(f"[REBUILD][ALL] period={period} -> {out_path}")
-    #     try:
-    #         # build_all_models_line(period: 'short'|'long', inputs_map, output_json_path)
-    #         build_all_models_line("short" if is_short else "long", inputs_map, out_path)
-    #     except Exception as e:
-    #         traceback.print_exc()
-    #         abort(500, description=f"Failed to build ALL chart: {e}")
-
-    #     if not os.path.exists(out_path):
-    #         abort(500, description=f"Generated ALL JSON missing: {out_path}")
-    #     return _no_cache_response(out_path)
-
     # ---- Single model candlestick ----
     csv_path = _csv_for_model(model_norm)
     if not os.path.exists(csv_path):
@@ -480,26 +461,6 @@ def get_gold_price():
 @app.route('/api/market-trends')
 def get_market_trends():
     return jsonify({'1H': 58, '24H': 41, '1W': 73, '1M': 73})
-
-# Avoid double-run under the dev reloader
-def _should_bootstrap():
-    # when using `flask run`, WERKZEUG_RUN_MAIN == 'true' only in the reloaded process
-    val = os.environ.get("WERKZEUG_RUN_MAIN")
-    return (val == "true") or (val is None)
-
-@app.before_request
-def _auto_pull_once():
-    # run exactly once (per process) on the first incoming request
-    if not _bootstrap_started.is_set():
-        # avoid double-run under the dev reloader; still harmless if it happens
-        main = os.environ.get("WERKZEUG_RUN_MAIN")
-        if (main == "true") or (main is None):
-            _bootstrap_started.set()
-            threading.Thread(
-                target=pull_csvs,              # your function that pulls CSVs
-                kwargs={"symbols": DEFAULT_SYMBOLS},
-                daemon=True
-            ).start()
 
 @app.route("/admin/rebuild-csv")
 def admin_rebuild_csv():
