@@ -1,0 +1,27 @@
+# Airflow providers (สำหรับ Spark / Postgres)
+apache-airflow-providers-apache-spark
+apache-airflow-providers-postgres
+pendulum
+
+# Data & ML stack
+pandas
+numpy
+yfinance
+statsmodels
+scikit-learn
+matplotlib
+
+# Time-series modelsที่คุณใช้
+prophet         # ต้องใช้ build tools (จัดใน Dockerfile ให้แล้ว)
+tensorflow      # CPU; พอสำหรับรันในคอนเทนเนอร์ทั่วไป
+
+# Utils
+psycopg2-binary  # ให้ Python ต่อ Postgres ได้
+pyarrow          # ถ้าจะเขียน/อ่าน parquet
+
+altair
+flask
+pandas
+numpy
+requests
+
