@@ -22,8 +22,8 @@ SCRIPT_DIR  = os.path.dirname(os.path.abspath(sys.argv[0]))
 PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
 HIST_BASE   = os.getenv('HIST_BASE_DIR', os.path.join(PROJECT_DIR, 'results'))
 
-HIST_SHORT_CAND = ['short_historic.csv']
-HIST_LONG_CAND  = ['long_historic.csv']
+HIST_SHORT_CAND = ['./web/static/chart/short_historic.csv']
+HIST_LONG_CAND  = ['./web/static/chart/long_historic.csv']
 
 # ---------------- Utility ----------------
 def _smart_datetime(s):
