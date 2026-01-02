@@ -4,6 +4,9 @@ import traceback
 import json, threading
 import yfinance as yf
 import pandas as pd
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.interval import IntervalTrigger
+import atexit
 
 from datetime import datetime
 from pathlib import Path
@@ -39,29 +42,6 @@ DEFAULT_SYMBOLS = os.environ.get("PULL_SYMBOLS", "GC=F").split(",")  # e.g. "GC=
 STATIC_CHART = os.path.join(BASE_DIR, "static", "chart")
 os.makedirs(STATIC_CHART, exist_ok=True)
 
-# Try to (re)build ALL-model JSONs at startup using artifact CSVs; don't fail hard if history missing
-try:
-    # use the artifacts forecasts folder as the historical base so generated CSVs are found
-    generate_all_jsons(
-        out_dir=STATIC_CHART,
-        hist_base_dir=FORECAST_ARTIFACTS_DIR,
-        short_inputs={
-            'Prophet':      os.path.join(FORECAST_ARTIFACTS_DIR, 'short', 'short_forecast_prophet.csv'),
-            'SARIMAX':      os.path.join(FORECAST_ARTIFACTS_DIR, 'short', 'short_forecast_sarimax.csv'),
-            'LSTM':         os.path.join(FORECAST_ARTIFACTS_DIR, 'short', 'short_forecast_lstm.csv'),
-            'Bayesian VAR': os.path.join(FORECAST_ARTIFACTS_DIR, 'short', 'short_forecast_bayesian_var.csv'),
-        },
-        long_inputs={
-            'Prophet':      os.path.join(FORECAST_ARTIFACTS_DIR, 'long', 'long_forecast_prophet.csv'),
-            'SARIMAX':      os.path.join(FORECAST_ARTIFACTS_DIR, 'long', 'long_forecast_sarimax.csv'),
-            'LSTM':         os.path.join(FORECAST_ARTIFACTS_DIR, 'long', 'long_forecast_lstm.csv'),
-            'Bayesian VAR': os.path.join(FORECAST_ARTIFACTS_DIR, 'long', 'long_forecast_bayesian_var.csv'),
-        },
-    )
-except Exception as e:
-    # Emit a warning but allow the Flask app to start; missing history is common in fresh checkouts
-    print(f"[WARN] generate_all_jsons skipped at startup: {e}")
-
 # Periods treated as "short" on the backend
 SHORT_PERIODS = {"1H", "24H", "1W"}
 
@@ -82,13 +62,114 @@ ALL_INPUTS_SHORT = {
 ALL_OUT_LONG  = os.path.join(JSON_DIR, "forecast_all_long_line.json")
 ALL_OUT_SHORT = os.path.join(JSON_DIR, "forecast_all_short_line.json")
 
+# =============== AUTO PULL FUNCTIONS ===============
+def run_pull_historic():
+    try:
+        print(f"[PULL-HISTORIC] Starting data download at {datetime.now()}")
+        
+        # Just run it and ignore any output encoding issues
+        import subprocess
+        import sys
+        
+        script_path = os.path.join(BASE_DIR, "pull_historic.py")
+        
+        # Run without capturing output (let it print directly)
+        result = subprocess.run(
+            [sys.executable, script_path, "--horizon", "both", "--outdir", STATIC_CHART],
+            timeout=300,
+            # Don't capture output to avoid encoding issues
+        )
+        
+        # Check if files were created regardless of output
+        short_csv = os.path.join(STATIC_CHART, "short_historic.csv")
+        long_csv = os.path.join(STATIC_CHART, "long_historic.csv")
+        
+        success = os.path.exists(short_csv) and os.path.exists(long_csv)
+        
+        if success:
+            print(f"[PULL-HISTORIC] CSV files created successfully")
+            return True
+        else:
+            print(f"[PULL-HISTORIC] Warning: Some CSV files may not have been created")
+            return False
+            
+    except Exception as e:
+        print(f"[PULL-HISTORIC] Error: {e}")
+        return False
+
+def auto_pull_historic_data():
+    try:
+        print(f"[AUTO-PULL] Starting automatic data pull at {datetime.now()}")
+        
+        # Run pull_historic.py script
+        success = run_pull_historic()
+        
+        if success:
+            print(f"[AUTO-PULL] Automatic data pull completed at {datetime.now()}")
+        else:
+            print(f"[AUTO-PULL] Automatic data pull failed at {datetime.now()}")
+        
+    except Exception as e:
+        print(f"[AUTO-PULL] Error during automatic data pull: {e}")
+        traceback.print_exc()
+
+def setup_scheduler():
+    scheduler = BackgroundScheduler(daemon=True)
+    
+    # Schedule auto_pull_historic_data to run every hour
+    scheduler.add_job(
+        func=auto_pull_historic_data,
+        trigger=IntervalTrigger(hours=1),
+        id='auto_pull_historic',
+        name='Auto pull historical data every hour',
+        replace_existing=True
+    )
+    
+    scheduler.start()
+    print("[SCHEDULER] Started with hourly data pulls")
+    return scheduler
+
+# =============== RUN PULL_HISTORIC ON STARTUP ===============
+print("[STARTUP] Running pull_historic.py to download initial data...")
+initial_success = run_pull_historic()
+
+if initial_success:
+    print("[STARTUP] Initial data download successful")
+    
+    try:
+        short_historic = os.path.join(STATIC_CHART, "short_historic.csv")
+        long_historic = os.path.join(STATIC_CHART, "long_historic.csv")
+        
+        # Try to build JSONs with the new data
+        try:
+            print("[STARTUP] Building forecast JSONs with new data...")
+            generate_all_jsons(
+                out_dir=STATIC_CHART,
+                hist_base_dir=FORECAST_ARTIFACTS_DIR,
+                short_inputs={
+                    'Prophet':      os.path.join(FORECAST_ARTIFACTS_DIR, 'short', 'short_forecast_prophet.csv'),
+                    'SARIMAX':      os.path.join(FORECAST_ARTIFACTS_DIR, 'short', 'short_forecast_sarimax.csv'),
+                    'LSTM':         os.path.join(FORECAST_ARTIFACTS_DIR, 'short', 'short_forecast_lstm.csv'),
+                    'Bayesian VAR': os.path.join(FORECAST_ARTIFACTS_DIR, 'short', 'short_forecast_bayesian_var.csv'),
+                },
+                long_inputs={
+                    'Prophet':      os.path.join(FORECAST_ARTIFACTS_DIR, 'long', 'long_forecast_prophet.csv'),
+                    'SARIMAX':      os.path.join(FORECAST_ARTIFACTS_DIR, 'long', 'long_forecast_sarimax.csv'),
+                    'LSTM':         os.path.join(FORECAST_ARTIFACTS_DIR, 'long', 'long_forecast_lstm.csv'),
+                    'Bayesian VAR': os.path.join(FORECAST_ARTIFACTS_DIR, 'long', 'long_forecast_bayesian_var.csv'),
+                },
+            )
+            print("[STARTUP] Forecast JSONs built successfully")
+        except Exception as e:
+            print(f"[STARTUP] Warning: Failed to build forecast JSONs: {e}")
+            print("[STARTUP] Continuing without JSON conversion...")
+    except Exception as e:
+        print(f"[STARTUP] Warning: Error copying files: {e}")
+else:
+    print("[STARTUP] Warning: Initial data download failed, app will start with existing data")
 
 # ---------------- Helpers ----------------
 def _normalize_model_key(period: str, model: str) -> str:
-    """
-    Accept a full key (long_prophet/short_lstm) or a label (Prophet/LSTM/SARIMAX/BVAR),
-    and normalize to 'long_<name>' or 'short_<name>' based on period.
-    """
     m = (model or "").strip().lower()
     if m in ("all", "all_models"):
         return "ALL"
@@ -142,7 +223,7 @@ def home():
         return send_from_directory(BASE_DIR, "index.html")
     return "<h3>App is running. Try /chart/1M/long_prophet.json</h3>"
 
-# ---------------- Historical data ----------------
+# ---------------- Historical data (original functions kept for compatibility) ----------------
 def _download_block(symbols, period, interval, auto_adjust=False):
     frames = []
     for sym in [s.strip() for s in symbols if s.strip()]:
@@ -171,7 +252,7 @@ def _pull_short(symbols):
         print("[PULL] WARN: filtered to empty; using raw for fill")
         df = df_raw.copy()
     df = df.interpolate("linear", limit_direction="both").ffill().bfill().fillna(0)
-    out = os.path.join(STATIC_CHART, "short_ohlc.csv")
+    out = os.path.join(STATIC_CHART, "short_historic.csv")  # Changed to short_historic.csv
     df.index.name = "Date"
     df.to_csv(out)
     print(f"[PULL] wrote {out} rows={len(df)}")
@@ -182,13 +263,12 @@ def _pull_long(symbols):
     df = _download_block(symbols, period="2y", interval="1d", auto_adjust=False)
     df = df[df.isna().sum(axis=1) <= 20]
     df = df.interpolate("linear", limit_direction="both").ffill().bfill()
-    out = os.path.join(STATIC_CHART, "long_ohlc.csv")
+    out = os.path.join(STATIC_CHART, "long_historic.csv")  # Changed to long_historic.csv
     df.index.name = "Date"
     df.to_csv(out)
     print(f"[PULL] wrote {out} rows={len(df)}")
 
 def pull_csvs(symbols=None):
-    """Run both pulls safely."""
     try:
         syms = symbols or DEFAULT_SYMBOLS
         _pull_short(syms)
@@ -240,7 +320,6 @@ def build_history_json(symbol: str = "GC=F", outdir: str | None = None):
 
 @app.before_request
 def _prime_history_once():
-    # run once per process
     if not app.config.get("_HISTORY_PRIMED", False):
         with _primed_lock:
             if not app.config.get("_HISTORY_PRIMED", False):
@@ -265,7 +344,6 @@ def _load_json_file(p: Path):
         return json.load(f)
 
 def _rows_from_spec(spec: dict) -> list:
-    """Extract rows from a forecast spec (support data.values or data.url)."""
     # 1) top-level values
     d = spec.get("data")
     if isinstance(d, dict) and isinstance(d.get("values"), list):
@@ -314,7 +392,6 @@ def _rows_from_spec(spec: dict) -> list:
     return []
 
 def _map_ohlc_row(r: dict) -> dict:
-    """Map {Date/Open/High/Low/Close} or {time/open/high/low/close} -> unified keys."""
     date = r.get("Date") or r.get("time")
     if date and "T" not in str(date):
         date = f"{date}T00:00:00"
@@ -333,10 +410,6 @@ def _parse_dt(s: str):
         return None
 
 def build_merged_json(period: str, model_label: str) -> str:
-    """
-    Build: static/chart/<period>/<model_label>_merged.json
-    Combine history (<= earliest forecast date) + forecast rows.
-    """
     per = (period or "").upper()
     forecast_spec_path = Path(JSON_DIR) / per / f"{model_label}.json"
 
@@ -390,12 +463,6 @@ def build_merged_json(period: str, model_label: str) -> str:
 
 @app.route("/chart/<period>/<model>.json")
 def chart_by_period_model(period, model):
-    """
-    Build on demand every time the URL is hit:
-      - model == 'All'  -> build_all_models_line(...) to static/chart/forecast_all_*.json
-      - otherwise       -> generate_forecast_chart(...) candlestick for that model
-    Returns the JSON with no-cache headers.
-    """
     model_norm = _normalize_model_key(period, model)
 
     # ---- Single model candlestick ----
@@ -424,6 +491,55 @@ def admin_build_merged():
         return jsonify({"ok": True, "period": period, "model": model, "merged": out_path})
     except Exception as e:
         traceback.print_exc()
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+# =============== AUTO PULL ENDPOINTS ===============
+@app.route("/admin/trigger-auto-pull")
+def admin_trigger_auto_pull():
+    """Manually trigger the automatic data pull (CSV only)"""
+    try:
+        threading.Thread(target=auto_pull_historic_data, daemon=True).start()
+        return jsonify({
+            "ok": True, 
+            "status": "Auto-pull triggered in background (CSV only)",
+            "next_scheduled": "1 hour from now"
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/admin/convert-to-json")
+def admin_convert_to_json():
+    try:
+        # Run in background thread
+        def convert_job():
+            print("[CONVERT] Starting CSV to JSON conversion...")
+            try:
+                generate_all_jsons(
+                    out_dir=STATIC_CHART,
+                    hist_base_dir=FORECAST_ARTIFACTS_DIR,
+                    short_inputs={
+                        'Prophet':      os.path.join(FORECAST_ARTIFACTS_DIR, 'short', 'short_forecast_prophet.csv'),
+                        'SARIMAX':      os.path.join(FORECAST_ARTIFACTS_DIR, 'short', 'short_forecast_sarimax.csv'),
+                        'LSTM':         os.path.join(FORECAST_ARTIFACTS_DIR, 'short', 'short_forecast_lstm.csv'),
+                        'Bayesian VAR': os.path.join(FORECAST_ARTIFACTS_DIR, 'short', 'short_forecast_bayesian_var.csv'),
+                    },
+                    long_inputs={
+                        'Prophet':      os.path.join(FORECAST_ARTIFACTS_DIR, 'long', 'long_forecast_prophet.csv'),
+                        'SARIMAX':      os.path.join(FORECAST_ARTIFACTS_DIR, 'long', 'long_forecast_sarimax.csv'),
+                        'LSTM':         os.path.join(FORECAST_ARTIFACTS_DIR, 'long', 'long_forecast_lstm.csv'),
+                        'Bayesian VAR': os.path.join(FORECAST_ARTIFACTS_DIR, 'long', 'long_forecast_bayesian_var.csv'),
+                    },
+                )
+                print("[CONVERT] CSV to JSON conversion completed successfully")
+            except Exception as e:
+                print(f"[CONVERT] Error during conversion: {e}")
+        
+        threading.Thread(target=convert_job, daemon=True).start()
+        return jsonify({
+            "ok": True, 
+            "status": "CSV to JSON conversion started in background"
+        })
+    except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
 # ---------------- Small APIs (unchanged) ----------------
@@ -471,4 +587,14 @@ def admin_rebuild_csv():
 
 # ---------------- Run ----------------
 if __name__ == '__main__':
+    # Start the scheduler for hourly updates
+    scheduler = setup_scheduler()
+    
+    # Register scheduler shutdown
+    atexit.register(lambda: scheduler.shutdown())
+    
+    # Start Flask app
+    print(f"[INFO] Starting Flask app")
+    print(f"[INFO] Next CSV data pull scheduled in 1 hour")
+    
     app.run(debug=True, host='0.0.0.0', port=int(os.environ.get("PORT", "5000")))
